@@ -129,47 +129,54 @@ public class CtrlAuthResponseApiCallHandler
         throws AccessDeniedException, InvalidValueException, DatabaseException
     {
         Node node = peer.getNode();
-        Props nodeProps = node.getProps(sysCtx);
-        @Nullable String oldUname = nodeProps.getProp(InternalApiConsts.NODE_UNAME);
-        @Nullable NodeName curNodeName = nodeRepo.getUname(sysCtx, nodeUname);
-        if (!nodeUname.equals(oldUname))
+        /*
+         * Special satellites run within the controller's process and therefore all report the
+         * controller's uname. They also never take part in DRBD, so the uname map (mapping DRBD
+         * peer unames to node names) does not apply to them.
+         */
+        if (!node.getNodeType(sysCtx).isSpecial())
         {
-            if (oldUname != null)
+            Props nodeProps = node.getProps(sysCtx);
+            @Nullable String oldUname = nodeProps.getProp(InternalApiConsts.NODE_UNAME);
+            @Nullable NodeName curNodeName = nodeRepo.getUname(sysCtx, nodeUname);
+            if (!nodeUname.equals(oldUname))
             {
-                // uname change, cleanup old uname
-                nodeRepo.removeUname(sysCtx, oldUname);
-            }
-            if (curNodeName != null)
-            {
-                peer.setAuthenticated(false);
-                peer.setConnectionStatus(ApiConsts.ConnectionStatus.DUPLICATE_UNAME);
-                errorReporter.reportError(
-                    Level.ERROR,
-                    new InvalidNameException(
-                        String.format(
-                            "Satellite has an uname '%s' that is already used by a different satellite '%s'",
-                            nodeUname,
-                            curNodeName),
-                        nodeUname
-                    )
-                );
+                if (oldUname != null)
+                {
+                    // uname change, cleanup old uname
+                    nodeRepo.removeUname(sysCtx, oldUname);
+                }
+                if (curNodeName != null)
+                {
+                    peer.setAuthenticated(false);
+                    peer.setConnectionStatus(ApiConsts.ConnectionStatus.DUPLICATE_UNAME);
+                    errorReporter.reportError(
+                        Level.ERROR,
+                        new InvalidNameException(
+                            String.format(
+                                "Satellite has an uname '%s' that is already used by a different satellite '%s'",
+                                nodeUname,
+                                curNodeName),
+                            nodeUname
+                        )
+                    );
+                }
+                else
+                {
+                    // new node added
+                    nodeProps.setProp(InternalApiConsts.NODE_UNAME, nodeUname);
+                    nodeRepo.putUname(sysCtx, nodeUname, node.getName());
+                }
             }
             else
             {
-                // new node added
-                nodeProps.setProp(InternalApiConsts.NODE_UNAME, nodeUname);
-                nodeRepo.putUname(sysCtx, nodeUname, node.getName());
+                if (curNodeName == null)
+                {
+                    // reconnect node
+                    nodeRepo.putUname(sysCtx, nodeUname, node.getName());
+                }
             }
         }
-        else
-        {
-            if (curNodeName == null)
-            {
-                // reconnect node
-                nodeRepo.putUname(sysCtx, nodeUname, node.getName());
-            }
-        }
-
     }
 
     private Flux<ApiCallRc> authResponseInTransaction(
