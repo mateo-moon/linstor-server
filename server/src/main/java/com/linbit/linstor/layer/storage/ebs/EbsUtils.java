@@ -13,6 +13,7 @@ import com.linbit.linstor.core.objects.AbsVolume;
 import com.linbit.linstor.core.objects.Node;
 import com.linbit.linstor.core.objects.Resource;
 import com.linbit.linstor.core.objects.Snapshot;
+import com.linbit.linstor.core.objects.SnapshotDefinition;
 import com.linbit.linstor.core.objects.SnapshotVolume;
 import com.linbit.linstor.core.objects.StorPool;
 import com.linbit.linstor.core.objects.Volume;
@@ -208,7 +209,23 @@ public class EbsUtils
         while (snapVlmIt.hasNext())
         {
             SnapshotVolume snapVlm = snapVlmIt.next();
-            allCompleted &= snapVlm.getState(accessContextRef).equals(EBS_SNAP_STATE_COMPLETED);
+            @Nullable String state = snapVlm.getState(accessContextRef);
+            if (state == null)
+            {
+                /*
+                 * The in-memory state is only populated by the EBS status poller, so it can be unset
+                 * right after the snapshot was taken or after a controller restart. A snapshot whose
+                 * creation flow finished (SUCCESSFUL flag) was already confirmed 'completed' by AWS
+                 * before the satellite reported success, so fall back to that flag.
+                 */
+                allCompleted &= snapshotRef.getSnapshotDefinition()
+                    .getFlags()
+                    .isSet(accessContextRef, SnapshotDefinition.Flags.SUCCESSFUL);
+            }
+            else
+            {
+                allCompleted &= state.equals(EBS_SNAP_STATE_COMPLETED);
+            }
         }
         return allCompleted;
     }
